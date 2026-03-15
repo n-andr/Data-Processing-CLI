@@ -1,36 +1,73 @@
-'use strict';
+import fs from 'node:fs';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { resolveInputPath } from '../utils/pathResolver.js';
 
-const fs = require('fs');
-const { resolvePath } = require('../utils/pathResolver');
-
-/**
- * Count the number of lines, words, and characters in a file.
- *
- * Usage: count <file>
- *
- * @param {string[]} args       - [filePath]
- * @param {string}   currentDir - Current navigation directory.
- * @returns {string} Result message.
- */
-function count(args, currentDir) {
-  if (args.length < 1) {
-    return 'Usage: count <file>';
+class CountTransform extends Transform {
+  constructor() {
+    super();
+    this.lines = 0;
+    this.words = 0;
+    this.characters = 0;
+    this.lastChunkEndedWithWhitespace = true;
   }
 
-  const filePath = resolvePath(currentDir, args[0]);
+  _transform(chunk, encoding, callback) {
+    try {
+      const text = chunk.toString();
 
-  let content;
-  try {
-    content = fs.readFileSync(filePath, 'utf8');
-  } catch (err) {
-    return `count: cannot read file: ${err.message}`;
+      this.characters += text.length;
+
+      for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+
+        if (char === '\n') {
+          this.lines += 1;
+        }
+
+        const isWhitespace = /\s/.test(char);
+
+        if (!isWhitespace && this.lastChunkEndedWithWhitespace) {
+          this.words += 1;
+        }
+
+        this.lastChunkEndedWithWhitespace = isWhitespace;
+      }
+
+      callback(null, chunk);
+    } catch (error) {
+      callback(error);
+    }
   }
-
-  const lines = content.split(/\r?\n/).length;
-  const words = content.trim() === '' ? 0 : content.trim().split(/\s+/).length;
-  const chars = content.length;
-
-  return `lines: ${lines}  words: ${words}  chars: ${chars}  ${filePath}`;
 }
 
-module.exports = { count };
+function getInputPath(args) {
+  const inputIndex = args.indexOf('--input');
+
+  if (inputIndex === -1 || !args[inputIndex + 1]) {
+    throw new Error('Invalid input');
+  }
+
+  return args[inputIndex + 1];
+}
+
+export async function count(args, currentDir) {
+  const inputArg = getInputPath(args);
+  const inputPath = resolveInputPath(currentDir, inputArg);
+  const counter = new CountTransform();
+
+  try {
+    await pipeline(
+      fs.createReadStream(inputPath),
+      counter
+    );
+
+    return [
+      `Lines: ${counter.lines}`,
+      `Words: ${counter.words}`,
+      `Characters: ${counter.characters}`,
+    ].join('\n');
+  } catch {
+    throw new Error('Operation failed');
+  }
+}

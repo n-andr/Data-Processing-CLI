@@ -1,21 +1,11 @@
-'use strict';
+import path from 'node:path';
 
-const path = require('path');
+export function resolveInputPath(currentDir, targetPath) {
+  if (!targetPath) {
+    throw new Error('Invalid input');
+  }
 
-/**
- * Resolve a file path relative to the current navigation directory.
- * @param {string} currentDir - The current navigation directory.
- * @param {string} inputPath  - The path to resolve.
- * @returns {string} Absolute resolved path.
- */
-function resolvePath(currentDir, inputPath) {
-  if (!inputPath) {
-    return currentDir;
-  }
-  if (path.isAbsolute(inputPath)) {
-    return path.normalize(inputPath);
-  }
-  return path.resolve(currentDir, inputPath);
+  return path.isAbsolute(targetPath)
+    ? path.normalize(targetPath)
+    : path.resolve(currentDir, targetPath);
 }
-
-module.exports = { resolvePath };
