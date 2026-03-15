@@ -38,7 +38,7 @@ async function dispatch(line, state) {
         return false;
       }
 
-      const { newDir, error } = cd(state.currentDir, args[0]);
+      const { newDir, error } = await cd(state.currentDir, args[0]);
 
       if (error) {
         console.log('Operation failed');
@@ -50,7 +50,7 @@ async function dispatch(line, state) {
     }
 
     case 'ls': {
-      const { entries, error } = ls(state.currentDir);
+      const { entries, error } = await ls(state.currentDir);
 
       if (error) {
         console.log('Operation failed');
