@@ -1,42 +1,82 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
+import { Writable } from 'node:stream';
+import { promises as fsp } from 'node:fs';
+import { resolveInputPath } from '../utils/pathResolver.js';
 
-const fs = require('fs');
-const crypto = require('crypto');
-const { resolvePath } = require('../utils/pathResolver');
+const SUPPORTED_ALGORITHMS = new Set(['sha256', 'md5', 'sha512']);
 
-const SUPPORTED_ALGORITHMS = ['md5', 'sha1', 'sha256', 'sha512'];
+function getOptionValue(args, optionName) {
+  const index = args.indexOf(optionName);
 
-/**
- * Compute the hash of a file.
- *
- * Usage: hash <algorithm> <file>
- *   algorithm: md5 | sha1 | sha256 | sha512
- *
- * @param {string[]} args       - [algorithm, filePath]
- * @param {string}   currentDir - Current navigation directory.
- * @returns {string} Result message containing the hex digest.
- */
-function hash(args, currentDir) {
-  if (args.length < 2) {
-    return `Usage: hash <algorithm> <file>\n  algorithms: ${SUPPORTED_ALGORITHMS.join(', ')}`;
+  if (index === -1 || !args[index + 1]) {
+    throw new Error('Invalid input');
   }
 
-  const algorithm = args[0].toLowerCase();
-  if (!SUPPORTED_ALGORITHMS.includes(algorithm)) {
-    return `hash: unsupported algorithm "${algorithm}". Supported: ${SUPPORTED_ALGORITHMS.join(', ')}`;
-  }
-
-  const filePath = resolvePath(currentDir, args[1]);
-
-  let content;
-  try {
-    content = fs.readFileSync(filePath);
-  } catch (err) {
-    return `hash: cannot read file: ${err.message}`;
-  }
-
-  const digest = crypto.createHash(algorithm).update(content).digest('hex');
-  return `${algorithm}(${filePath}) = ${digest}`;
+  return args[index + 1];
 }
 
-module.exports = { hash };
+function hasFlag(args, flagName) {
+  return args.includes(flagName);
+}
+
+function getAlgorithm(args) {
+  if (!args.includes('--algorithm')) {
+    return 'sha256';
+  }
+
+  const algorithm = getOptionValue(args, '--algorithm');
+
+  if (!SUPPORTED_ALGORITHMS.has(algorithm)) {
+    throw new Error('Operation failed');
+  }
+
+  return algorithm;
+}
+
+class HashWritable extends Writable {
+  constructor(hash) {
+    super();
+    this.hash = hash;
+  }
+
+  _write(chunk, encoding, callback) {
+    try {
+      this.hash.update(chunk);
+      callback();
+    } catch (error) {
+      callback(error);
+    }
+  }
+}
+
+export async function hash(args, currentDir) {
+  const inputArg = getOptionValue(args, '--input');
+  const algorithm = getAlgorithm(args);
+  const shouldSave = hasFlag(args, '--save');
+
+  const inputPath = resolveInputPath(currentDir, inputArg);
+  const hashInstance = createHash(algorithm);
+  const hashWriter = new HashWritable(hashInstance);
+
+  try {
+    await pipeline(
+      fs.createReadStream(inputPath),
+      hashWriter
+    );
+
+    const digest = hashInstance.digest('hex');
+    const output = `${algorithm}: ${digest}`;
+
+    if (shouldSave) {
+      const hashFilePath = `${inputPath}.${algorithm}`;
+      await fsp.writeFile(hashFilePath, digest);
+    }
+
+    return output;
+  } catch {
+    throw new Error('Operation failed');
+  }
+}

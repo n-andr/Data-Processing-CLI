@@ -1,37 +1,34 @@
-'use strict';
+export function parseArgs(input) {
+  if (!input || input.trim() === '') {
+    return [];
+  }
 
-/**
- * Parse a raw argument string into an array of tokens, respecting
- * double-quoted strings (quotes are stripped from tokens).
- *
- * @param {string} input - The raw argument string (excluding the command name).
- * @returns {string[]} Array of parsed argument tokens.
- */
-function parseArgs(input) {
   const args = [];
   let current = '';
-  let inQuotes = false;
+  let insideQuotes = false;
 
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i];
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
 
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === ' ' && !inQuotes) {
-      if (current.length > 0) {
+    if (char === '"') {
+      insideQuotes = !insideQuotes;
+      continue;
+    }
+
+    if (char === ' ' && !insideQuotes) {
+      if (current !== '') {
         args.push(current);
         current = '';
       }
-    } else {
-      current += ch;
+      continue;
     }
+
+    current += char;
   }
 
-  if (current.length > 0) {
+  if (current !== '') {
     args.push(current);
   }
 
   return args;
 }
-
-module.exports = { parseArgs };

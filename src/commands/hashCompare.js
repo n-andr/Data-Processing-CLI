@@ -1,55 +1,88 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
+import { Writable } from 'node:stream';
+import { promises as fsp } from 'node:fs';
+import { resolveInputPath } from '../utils/pathResolver.js';
 
-const fs = require('fs');
-const crypto = require('crypto');
-const { resolvePath } = require('../utils/pathResolver');
+const SUPPORTED_ALGORITHMS = new Set(['sha256', 'md5', 'sha512']);
 
-const SUPPORTED_ALGORITHMS = ['md5', 'sha1', 'sha256', 'sha512'];
+function getOptionValue(args, optionName) {
+  const index = args.indexOf(optionName);
 
-/**
- * Compute and compare the hash of two files.
- *
- * Usage: hash-compare <algorithm> <file1> <file2>
- *   algorithm: md5 | sha1 | sha256 | sha512
- *
- * @param {string[]} args       - [algorithm, filePath1, filePath2]
- * @param {string}   currentDir - Current navigation directory.
- * @returns {string} Result message indicating whether the hashes match.
- */
-function hashCompare(args, currentDir) {
-  if (args.length < 3) {
-    return `Usage: hash-compare <algorithm> <file1> <file2>\n  algorithms: ${SUPPORTED_ALGORITHMS.join(', ')}`;
+  if (index === -1 || !args[index + 1]) {
+    throw new Error('Invalid input');
   }
 
-  const algorithm = args[0].toLowerCase();
-  if (!SUPPORTED_ALGORITHMS.includes(algorithm)) {
-    return `hash-compare: unsupported algorithm "${algorithm}". Supported: ${SUPPORTED_ALGORITHMS.join(', ')}`;
-  }
-
-  const file1 = resolvePath(currentDir, args[1]);
-  const file2 = resolvePath(currentDir, args[2]);
-
-  let content1, content2;
-  try {
-    content1 = fs.readFileSync(file1);
-  } catch (err) {
-    return `hash-compare: cannot read file "${args[1]}": ${err.message}`;
-  }
-  try {
-    content2 = fs.readFileSync(file2);
-  } catch (err) {
-    return `hash-compare: cannot read file "${args[2]}": ${err.message}`;
-  }
-
-  const digest1 = crypto.createHash(algorithm).update(content1).digest('hex');
-  const digest2 = crypto.createHash(algorithm).update(content2).digest('hex');
-
-  const match = digest1 === digest2;
-  return [
-    `${algorithm}(${file1}) = ${digest1}`,
-    `${algorithm}(${file2}) = ${digest2}`,
-    match ? 'MATCH ✓' : 'MISMATCH ✗',
-  ].join('\n');
+  return args[index + 1];
 }
 
-module.exports = { hashCompare };
+
+function getAlgorithm(args) {
+  if (!args.includes('--algorithm')) {
+    return 'sha256';
+  }
+
+  const algorithm = getOptionValue(args, '--algorithm');
+
+  if (!SUPPORTED_ALGORITHMS.has(algorithm)) {
+    throw new Error('Operation failed');
+  }
+
+  return algorithm;
+}
+
+class HashWritable extends Writable {
+  constructor(hash) {
+    super();
+    this.hash = hash;
+  }
+
+  _write(chunk, encoding, callback) {
+    try {
+      this.hash.update(chunk);
+      callback();
+    } catch (error) {
+      callback(error);
+    }
+  }
+}
+
+async function calculateFileHash(inputPath, algorithm) {
+  const hashInstance = createHash(algorithm);
+  const hashWriter = new HashWritable(hashInstance);
+
+  await pipeline(
+    fs.createReadStream(inputPath),
+    hashWriter
+  );
+
+  return hashInstance.digest('hex');
+}
+
+export async function hashCompare(args, currentDir) {
+  const inputArg = getOptionValue(args, '--input');
+  const hashArg = getOptionValue(args, '--hash');
+  const algorithm = getAlgorithm(args);
+
+  const inputPath = resolveInputPath(currentDir, inputArg);
+  const hashPath = resolveInputPath(currentDir, hashArg);
+
+  try {
+    const [actualHash, expectedHashRaw] = await Promise.all([
+      calculateFileHash(inputPath, algorithm),
+      fsp.readFile(hashPath, 'utf8'),
+    ]);
+
+    const expectedHash = expectedHashRaw.trim().toLowerCase();
+
+    if (actualHash.toLowerCase() === expectedHash) {
+      return 'OK';
+    }
+
+    return 'MISMATCH';
+  } catch {
+    throw new Error('Operation failed');
+  }
+}
