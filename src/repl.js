@@ -1,153 +1,146 @@
-'use strict';
+import readline from 'node:readline';
+import { parseArgs } from './utils/argParser.js';
+import { up, cd, ls } from './navigation.js';
+import { csvToJson } from './commands/csvToJson.js';
+import { jsonToCsv } from './commands/jsonToCsv.js';
+import { count } from './commands/count.js';
+import { hash } from './commands/hash.js';
+import { hashCompare } from './commands/hashCompare.js';
+import { encrypt } from './commands/encrypt.js';
+import { decrypt } from './commands/decrypt.js';
+import { logStats } from './commands/logStats.js';
 
-const { parseArgs } = require('./utils/argParser');
-const { up, cd, ls } = require('./navigation');
-const { csvToJson } = require('./commands/csvToJson');
-const { jsonToCsv } = require('./commands/jsonToCsv');
-const { count } = require('./commands/count');
-const { hash } = require('./commands/hash');
-const { hashCompare } = require('./commands/hashCompare');
-const { encrypt } = require('./commands/encrypt');
-const { decrypt } = require('./commands/decrypt');
-const { logStats } = require('./commands/logStats');
-
-/**
- * Dispatch a REPL input line to the appropriate command handler.
- *
- * @param {string}   line       - Raw input line from the REPL.
- * @param {object}   state      - Mutable navigation state: { currentDir: string }
- * @param {Function} output     - Function to write output (defaults to console.log).
- * @returns {Promise<void>}
- */
-async function dispatch(line, state, output = console.log) {
+async function dispatch(line, state) {
   const trimmed = line.trim();
-  if (!trimmed) return;
 
-  // Split into command and the rest of the line
+  if (!trimmed) {
+    return false;
+  }
+
+  if (trimmed === '.exit') {
+    return 'exit';
+  }
+
   const spaceIdx = trimmed.indexOf(' ');
   const command = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
   const rest = spaceIdx === -1 ? '' : trimmed.slice(spaceIdx + 1);
   const args = parseArgs(rest);
 
   switch (command) {
-    // ── Navigation ──────────────────────────────────────────────────────────
     case 'up': {
       state.currentDir = up(state.currentDir);
-      output(state.currentDir);
-      break;
+      return true;
     }
 
     case 'cd': {
+      if (!args[0]) {
+        console.log('Invalid input');
+        return false;
+      }
+
       const { newDir, error } = cd(state.currentDir, args[0]);
+
+      if (error) {
+        console.log('Operation failed');
+        return false;
+      }
+
       state.currentDir = newDir;
-      if (error) output(error);
-      else output(state.currentDir);
-      break;
+      return true;
     }
 
     case 'ls': {
       const { entries, error } = ls(state.currentDir);
-      if (error) output(error);
-      else output(entries.join('\n'));
-      break;
+
+      if (error) {
+        console.log('Operation failed');
+        return false;
+      }
+
+      console.log(entries.join('\n'));
+      return true;
     }
 
-    // ── Data conversion ──────────────────────────────────────────────────────
     case 'csv-to-json': {
-      output(csvToJson(args, state.currentDir));
-      break;
+      await csvToJson(args, state.currentDir);
+      return true;
     }
 
     case 'json-to-csv': {
-      output(jsonToCsv(args, state.currentDir));
-      break;
+      await jsonToCsv(args, state.currentDir);
+      return true;
     }
 
-    // ── File utilities ────────────────────────────────────────────────────────
     case 'count': {
-      output(count(args, state.currentDir));
-      break;
+      const result = await count(args, state.currentDir);
+      console.log(result);
+      return true;
     }
 
     case 'hash': {
-      output(hash(args, state.currentDir));
-      break;
+      const result = await hash(args, state.currentDir);
+      console.log(result);
+      return true;
     }
 
     case 'hash-compare': {
-      output(hashCompare(args, state.currentDir));
-      break;
+      const result = await hashCompare(args, state.currentDir);
+      console.log(result);
+      return true;
     }
 
-    // ── Encryption ────────────────────────────────────────────────────────────
     case 'encrypt': {
-      output(encrypt(args, state.currentDir));
-      break;
+      await encrypt(args, state.currentDir);
+      return true;
     }
 
     case 'decrypt': {
-      output(decrypt(args, state.currentDir));
-      break;
+      await decrypt(args, state.currentDir);
+      return true;
     }
 
-    // ── Log analysis ──────────────────────────────────────────────────────────
     case 'log-stats': {
-      const result = await logStats(args, state.currentDir);
-      output(result);
-      break;
-    }
-
-    // ── Meta ──────────────────────────────────────────────────────────────────
-    case 'help': {
-      output(HELP_TEXT);
-      break;
-    }
-
-    case 'pwd': {
-      output(state.currentDir);
-      break;
-    }
-
-    case 'exit':
-    case 'quit': {
-      output('Goodbye!');
-      process.exit(0);
-      break;
+      await logStats(args, state.currentDir);
+      return true;
     }
 
     default: {
-      output(`Unknown command: "${command}". Type "help" for available commands.`);
+      console.log('Invalid input');
+      return false;
     }
   }
 }
 
-const HELP_TEXT = `
-Available commands:
-  Navigation:
-    pwd                              Print current directory
-    ls                               List directory contents
-    cd <dir>                         Change directory
-    up                               Go up one directory level
+export function startRepl({ state, onExit, onSuccess }) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: '> ',
+  });
 
-  Data conversion:
-    csv-to-json <input> <output>     Convert CSV file to JSON
-    json-to-csv <input> <output>     Convert JSON file to CSV
+  rl.prompt();
 
-  File utilities:
-    count <file>                     Count lines, words and characters
-    hash <algorithm> <file>          Compute file hash (md5/sha1/sha256/sha512)
-    hash-compare <algo> <f1> <f2>   Compare hashes of two files
+  rl.on('line', async (line) => {
+    try {
+      const result = await dispatch(line, state);
 
-  Encryption:
-    encrypt <input> <output> <pass>  Encrypt a file with AES-256-CBC
-    decrypt <input> <output> <pass>  Decrypt an encrypted file
+      if (result === 'exit') {
+        rl.close();
+        onExit();
+        return;
+      }
 
-  Log analysis:
-    log-stats <logfile>              Show statistics for an access log file
+      if (result === true) {
+        onSuccess();
+      }
+    } catch (error) {
+      console.log('Operation failed');
+    }
 
-  Other:
-    help                             Show this help text
-    exit | quit                      Exit the CLI
-`.trim();
+    rl.prompt();
+  });
 
-module.exports = { dispatch };
+  rl.on('close', () => {
+    onExit();
+  });
+}

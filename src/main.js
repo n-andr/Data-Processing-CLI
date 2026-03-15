@@ -1,60 +1,53 @@
-'use strict';
+import os from 'node:os';
+import { startRepl } from './repl.js';
 
-const repl = require('repl');
-const { dispatch } = require('./repl');
+const WELCOME_MESSAGE = 'Welcome to Data Processing CLI!';
+const GOODBYE_MESSAGE = 'Thank you for using Data Processing CLI!';
 
-/**
- * Navigation state shared across all REPL commands.
- * Starts in the user's home directory.
- */
-const state = {
-  currentDir: process.cwd(),
-};
-
-/**
- * Custom REPL evaluator that delegates every input line to the command
- * dispatcher and manages async results.
- *
- * @param {string}   cmd      - Input line (Node REPL appends a newline).
- * @param {object}   _context - REPL context (unused).
- * @param {string}   _file    - Filename (unused).
- * @param {Function} callback - Node REPL callback(err, result).
- */
-async function evaluate(cmd, _context, _file, callback) {
-  try {
-    await dispatch(cmd, state);
-    callback(null);
-  } catch (err) {
-    callback(err);
-  }
+function printCurrentDirectory(currentDir) {
+  console.log(`You are currently in ${currentDir}`);
 }
 
-/**
- * Dynamic prompt that always shows the current directory.
- * @returns {string}
- */
-function buildPrompt() {
-  return `[${state.currentDir}] $ `;
+function exitGracefully() {
+  console.log(GOODBYE_MESSAGE);
+  process.exit(0);
 }
 
-// ── Start REPL ────────────────────────────────────────────────────────────────
+function main() {
+  const state = {
+    currentDir: os.homedir(),
+  };
 
-const replServer = repl.start({
-  prompt: buildPrompt(),
-  eval: evaluate,
-  ignoreUndefined: true,
-});
+  console.log(WELCOME_MESSAGE);
+  printCurrentDirectory(state.currentDir);
 
-// Refresh the prompt to reflect directory changes after each command
-replServer.on('reset', () => {
-  replServer.setPrompt(buildPrompt());
-});
+  let isExiting = false;
 
-replServer.eval = async function (cmd, context, file, callback) {
-  await evaluate(cmd, context, file, (err, result) => {
-    replServer.setPrompt(buildPrompt());
-    callback(err, result);
+  const safeExit = () => {
+    if (isExiting) {
+      return;
+    }
+    isExiting = true;
+    exitGracefully();
+  };
+
+  process.on('SIGINT', safeExit);
+
+  process.on('uncaughtException', () => {
+    console.log('Operation failed');
   });
-};
 
-console.log('Data Processing CLI — type "help" for available commands.\n');
+  process.on('unhandledRejection', () => {
+    console.log('Operation failed');
+  });
+
+  startRepl({
+    state,
+    onExit: safeExit,
+    onSuccess: () => {
+      printCurrentDirectory(state.currentDir);
+    },
+  });
+}
+
+main();
