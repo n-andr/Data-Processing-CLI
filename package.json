@@ -1,0 +1,14 @@
+{
+  "name": "data-processing-cli",
+  "version": "1.0.0",
+  "description": "Data Processing CLI",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
